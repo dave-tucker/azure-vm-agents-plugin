@@ -80,10 +80,12 @@ public class AzureVMAgentTemplate implements Describable<AzureVMAgentTemplate>, 
         UNKNOWN,
         CUSTOM,
         REFERENCE,
+        CUSTOM_REFERENCE,
     }
 
     public static class ImageReferenceTypeClass {
         private String image;
+        private String imageId;
         private String imagePublisher;
         private String imageOffer;
         private String imageSku;
@@ -92,11 +94,13 @@ public class AzureVMAgentTemplate implements Describable<AzureVMAgentTemplate>, 
         @DataBoundConstructor
         public ImageReferenceTypeClass(
                 String image,
+                String imageId,
                 String imagePublisher,
                 String imageOffer,
                 String imageSku,
                 String imageVersion) {
             this.image = image;
+            this.imageId = imageId;
             this.imagePublisher = imagePublisher;
             this.imageOffer = imageOffer;
             this.imageSku = imageSku;
@@ -105,6 +109,10 @@ public class AzureVMAgentTemplate implements Describable<AzureVMAgentTemplate>, 
 
         public String getImage() {
             return image;
+        }
+
+        public String getImageId() {
+            return imageId;
         }
 
         public String getImagePublisher() {
@@ -173,6 +181,8 @@ public class AzureVMAgentTemplate implements Describable<AzureVMAgentTemplate>, 
     private final String image;
 
     private final String osType;
+
+    private final String imageId;
 
     private final String imagePublisher;
 
@@ -294,6 +304,7 @@ public class AzureVMAgentTemplate implements Describable<AzureVMAgentTemplate>, 
         this.isInstallMaven = isInstallMaven;
         this.image = imageReferenceTypeClass.getImage();
         this.osType = osType;
+        this.imageId = imageReferenceTypeClass.getImageId();
         this.imagePublisher = imageReferenceTypeClass.getImagePublisher();
         this.imageOffer = imageReferenceTypeClass.getImageOffer();
         this.imageSku = imageReferenceTypeClass.getImageSku();
@@ -332,6 +343,8 @@ public class AzureVMAgentTemplate implements Describable<AzureVMAgentTemplate>, 
         String imageSkuName =
                 template.getIsInstallDocker() ? Constants.DEFAULT_DOCKER_IMAGE_SKU : Constants.DEFAULT_IMAGE_SKU;
 
+        templateProperties.put("imageId",
+                isBasic ? defaultProperties.get(Constants.DEFAULT_IMAGE_ID) : template.getImageId());
         templateProperties.put("imagePublisher",
                 isBasic ? defaultProperties.get(Constants.DEFAULT_IMAGE_PUBLISHER) : template.getImagePublisher());
         templateProperties.put("imageOffer",
@@ -446,6 +459,7 @@ public class AzureVMAgentTemplate implements Describable<AzureVMAgentTemplate>, 
 
         if (StringUtils.isBlank(imageTopLevelType)) {
             if (StringUtils.isNotBlank(image)
+                    || StringUtils.isNotBlank(imageId)
                     || StringUtils.isNotBlank(imageOffer)
                     || StringUtils.isNotBlank(imageSku)
                     || StringUtils.isNotBlank(imagePublisher)) {
@@ -558,6 +572,9 @@ public class AzureVMAgentTemplate implements Describable<AzureVMAgentTemplate>, 
         if (imageReferenceTypeClass.image != null) {
             return "custom";
         }
+        if (imageReferenceTypeClass.imageId != null) {
+            return "customReference";
+        }
         return "reference";
     }
 
@@ -587,6 +604,10 @@ public class AzureVMAgentTemplate implements Describable<AzureVMAgentTemplate>, 
 
     public boolean getPreInstallSsh() {
         return preInstallSsh;
+    }
+
+    public String getImageId() {
+        return imageId;
     }
 
     public String getImagePublisher() {
@@ -756,7 +777,12 @@ public class AzureVMAgentTemplate implements Describable<AzureVMAgentTemplate>, 
     public AdvancedImage getAdvancedImageInside() {
         return new AdvancedImageBuilder()
                 .withCustomImage(getImage())
-                .withReferenceImage(getImagePublisher(), getImageOffer(), getImageSku(), getImageVersion())
+                .withReferenceImage(getImageId(),
+                        getImagePublisher(),
+                        getImageOffer(),
+                        getImageSku(),
+                        getImageVersion()
+                )
                 .withNumberOfExecutors(String.valueOf(getNoOfParallelJobs()))
                 .withOsType(getOsType())
                 .withLaunchMethod(getAgentLaunchMethod())
@@ -834,6 +860,20 @@ public class AzureVMAgentTemplate implements Describable<AzureVMAgentTemplate>, 
      * @throws Exception
      */
     public List<String> verifyTemplate() throws Exception {
+        ImageReferenceType refType;
+        switch (imageReferenceType) {
+            case "custom":
+                refType = ImageReferenceType.CUSTOM;
+                break;
+            case "customReference":
+                refType = ImageReferenceType.CUSTOM_REFERENCE;
+                break;
+            case "reference":
+                refType = ImageReferenceType.REFERENCE;
+                break;
+            default:
+                refType = ImageReferenceType.UNKNOWN;
+        }
         return getServiceDelegate().verifyTemplate(
                 templateName,
                 labels,
@@ -843,12 +883,11 @@ public class AzureVMAgentTemplate implements Describable<AzureVMAgentTemplate>, 
                 storageAccountType,
                 noOfParallelJobs + "",
                 imageTopLevelType,
-                (imageReferenceType == null) ? ImageReferenceType.UNKNOWN
-                        : ((imageReferenceType.equals("custom") ? ImageReferenceType.CUSTOM
-                        : ImageReferenceType.REFERENCE)),
+                refType,
                 builtInImage,
                 image,
                 osType,
+                imageId,
                 imagePublisher,
                 imageOffer,
                 imageSku,
@@ -1132,6 +1171,7 @@ public class AzureVMAgentTemplate implements Describable<AzureVMAgentTemplate>, 
                 @QueryParameter String builtInImage,
                 @RelativePath("imageReferenceTypeClass") @QueryParameter String image,
                 @QueryParameter String osType,
+                @RelativePath("imageReferenceTypeClass") @QueryParameter String imageId,
                 @RelativePath("imageReferenceTypeClass") @QueryParameter String imagePublisher,
                 @RelativePath("imageReferenceTypeClass") @QueryParameter String imageOffer,
                 @RelativePath("imageReferenceTypeClass") @QueryParameter String imageSku,
@@ -1154,8 +1194,13 @@ public class AzureVMAgentTemplate implements Describable<AzureVMAgentTemplate>, 
             */
             ImageReferenceType referenceType = ImageReferenceType.UNKNOWN;
             if (imageReferenceType != null) {
-                referenceType =
-                        imageReferenceType.equals("custom") ? ImageReferenceType.CUSTOM : ImageReferenceType.REFERENCE;
+                 if (imageReferenceType.equals("custom")) {
+                     referenceType = ImageReferenceType.CUSTOM;
+                 } else if (imageReferenceType.equals("imageReference")) {
+                    referenceType = ImageReferenceType.REFERENCE;
+                 } else if (imageReferenceType.equals("customReference")) {
+                    referenceType = ImageReferenceType.CUSTOM_REFERENCE;
+                 }
             }
             String resourceGroupName = AzureVMCloud.getResourceGroupName(
                     resourceGroupReferenceType, newResourceGroupName, existingResourceGroupName);
@@ -1179,19 +1224,20 @@ public class AzureVMAgentTemplate implements Describable<AzureVMAgentTemplate>, 
                             + "builtInImage: {12};\n\t"
                             + "image: {13};\n\t"
                             + "osType: {14};\n\t"
-                            + "imagePublisher: {15};\n\t"
-                            + "imageOffer: {16};\n\t"
-                            + "imageSku: {17};\n\t"
-                            + "imageVersion: {18};\n\t"
-                            + "agentLaunchMethod: {19};\n\t"
-                            + "initScript: {20};\n\t"
-                            + "credentialsId: {21};\n\t"
-                            + "virtualNetworkName: {22};\n\t"
-                            + "virtualNetworkResourceGroupName: {23};\n\t"
-                            + "subnetName: {24};\n\t"
-                            + "privateIP: {25};\n\t"
-                            + "nsgName: {26};\n\t"
-                            + "jvmOptions: {27};",
+                            + "imageId: {15};\n\t"
+                            + "imagePublisher: {16};\n\t"
+                            + "imageOffer: {17};\n\t"
+                            + "imageSku: {18};\n\t"
+                            + "imageVersion: {19};\n\t"
+                            + "agentLaunchMethod: {20};\n\t"
+                            + "initScript: {21};\n\t"
+                            + "credentialsId: {22};\n\t"
+                            + "virtualNetworkName: {23};\n\t"
+                            + "virtualNetworkResourceGroupName: {24};\n\t"
+                            + "subnetName: {25};\n\t"
+                            + "privateIP: {26};\n\t"
+                            + "nsgName: {27};\n\t"
+                            + "jvmOptions: {28};",
                     new Object[]{
                             "",
                             "",
@@ -1208,6 +1254,7 @@ public class AzureVMAgentTemplate implements Describable<AzureVMAgentTemplate>, 
                             builtInImage,
                             image,
                             osType,
+                            imageId,
                             imagePublisher,
                             imageOffer,
                             imageSku,
@@ -1243,6 +1290,7 @@ public class AzureVMAgentTemplate implements Describable<AzureVMAgentTemplate>, 
                     builtInImage,
                     image,
                     osType,
+                    imageId,
                     imagePublisher,
                     imageOffer,
                     imageSku,

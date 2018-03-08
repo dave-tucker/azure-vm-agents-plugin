@@ -27,6 +27,7 @@ import com.microsoft.azure.management.network.Network;
 import com.microsoft.azure.management.network.NetworkSecurityGroup;
 import com.microsoft.azure.management.network.PublicIPAddress;
 import com.microsoft.azure.management.resources.DeploymentMode;
+import com.microsoft.azure.management.resources.GenericResource;
 import com.microsoft.azure.management.resources.fluentcore.arm.ExpandableStringEnum;
 import com.microsoft.azure.management.resources.fluentcore.arm.Region;
 import com.microsoft.azure.management.storage.*;
@@ -51,6 +52,7 @@ import org.jenkinsci.plugins.cloudstats.ProvisioningActivity;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.invoke.ConstantCallSite;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
@@ -85,6 +87,12 @@ public final class AzureVMManagementServiceDelegate {
 
     private static final String EMBEDDED_TEMPLATE_IMAGE_WITH_SCRIPT_MANAGED_FILENAME =
             "/customImageTemplateWithScriptAndManagedDisk.json";
+
+    private static final String EMBEDDED_TEMPLATE_IMAGE_ID_WITH_MANAGED_FILENAME =
+            "/referenceImageIDTemplateWithManagedDisk.json";
+
+    private static final String EMBEDDED_TEMPLATE_IMAGE_ID_WITH_SCRIPT_MANAGED_FILENAME =
+            "/referenceImageIDTemplateWithScriptAndManagedDisk.json";
 
     private static final String VIRTUAL_NETWORK_TEMPLATE_FRAGMENT_FILENAME = "/virtualNetworkFragment.json";
 
@@ -234,9 +242,13 @@ public final class AzureVMManagementServiceDelegate {
                 if (useManagedDisk) {
                     msg = "AzureVMManagementServiceDelegate: createDeployment: "
                             + "Use embedded deployment template (with script and managed) {0}";
-                    templateLocation = useCustomImage
-                            ? EMBEDDED_TEMPLATE_IMAGE_WITH_SCRIPT_MANAGED_FILENAME
-                            : EMBEDDED_TEMPLATE_WITH_SCRIPT_MANAGED_FILENAME;
+                    if (useCustomImage) {
+                        templateLocation = EMBEDDED_TEMPLATE_IMAGE_WITH_SCRIPT_MANAGED_FILENAME;
+                    } else {
+                        templateLocation = StringUtils.isNotBlank(template.getImageId())
+                                ? EMBEDDED_TEMPLATE_IMAGE_ID_WITH_SCRIPT_MANAGED_FILENAME
+                                : EMBEDDED_TEMPLATE_WITH_SCRIPT_MANAGED_FILENAME;
+                    }
                 } else {
                     msg = "AzureVMManagementServiceDelegate: createDeployment: "
                             + "Use embedded deployment template (with script) {0}";
@@ -248,9 +260,13 @@ public final class AzureVMManagementServiceDelegate {
                 if (useManagedDisk) {
                     msg = "AzureVMManagementServiceDelegate: createDeployment: "
                             + "Use embedded deployment template (with managed) {0}";
-                    templateLocation = useCustomImage
-                            ? EMBEDDED_TEMPLATE_IMAGE_WITH_MANAGED_FILENAME
+                    if (useCustomImage) {
+                        templateLocation = EMBEDDED_TEMPLATE_IMAGE_WITH_MANAGED_FILENAME;
+                    } else {
+                        templateLocation = StringUtils.isNotBlank(template.getImageId())
+                            ? EMBEDDED_TEMPLATE_IMAGE_ID_WITH_MANAGED_FILENAME
                             : EMBEDDED_TEMPLATE_WITH_MANAGED_FILENAME;
+                    }
                 } else {
                     msg = "AzureVMManagementServiceDelegate: createDeployment: "
                             + "Use embedded deployment template {0}";
@@ -278,6 +294,7 @@ public final class AzureVMManagementServiceDelegate {
             putVariable(tmp, "resourceTag", deploymentRegistrar.getDeploymentTag().get());
             putVariable(tmp, "cloudTag", template.getAzureCloud().getCloudName());
 
+            copyVariableIfNotBlank(tmp, properties, "imageId");
             copyVariableIfNotBlank(tmp, properties, "imagePublisher");
             copyVariableIfNotBlank(tmp, properties, "imageOffer");
             copyVariableIfNotBlank(tmp, properties, "imageSku");
@@ -1692,6 +1709,7 @@ public final class AzureVMManagementServiceDelegate {
      * @param builtInImage
      * @param image
      * @param osType
+     * @param imageId
      * @param imagePublisher
      * @param imageOffer
      * @param imageSku
@@ -1722,6 +1740,7 @@ public final class AzureVMManagementServiceDelegate {
             String builtInImage,
             String image,
             String osType,
+            String imageId,
             String imagePublisher,
             String imageOffer,
             String imageSku,
@@ -1787,6 +1806,7 @@ public final class AzureVMManagementServiceDelegate {
                     builtInImage,
                     image,
                     osType,
+                    imageId,
                     imagePublisher,
                     imageOffer,
                     imageSku,
@@ -1802,6 +1822,7 @@ public final class AzureVMManagementServiceDelegate {
                     referenceType,
                     builtInImage,
                     image,
+                    imageId,
                     imagePublisher,
                     imageOffer,
                     imageSku,
@@ -1819,7 +1840,7 @@ public final class AzureVMManagementServiceDelegate {
 
         } catch (Exception e) {
             LOGGER.log(Level.SEVERE, "Error validating template", e);
-            errors.add("Error occured while validating Azure Profile");
+            errors.add("Error occurred while validating Azure Profile");
         }
 
         return errors;
@@ -1831,6 +1852,7 @@ public final class AzureVMManagementServiceDelegate {
             final AzureVMAgentTemplate.ImageReferenceType referenceType,
             final String builtInImage,
             final String image,
+            final String imageId,
             final String imagePublisher,
             final String imageOffer,
             final String imageSku,
@@ -1874,6 +1896,7 @@ public final class AzureVMManagementServiceDelegate {
                         referenceType,
                         builtInImage,
                         image,
+                        imageId,
                         imagePublisher,
                         imageOffer,
                         imageSku,
@@ -1990,6 +2013,7 @@ public final class AzureVMManagementServiceDelegate {
             AzureVMAgentTemplate.ImageReferenceType referenceType,
             String builtInImage,
             String image,
+            String imageId,
             String imagePublisher,
             String imageOffer,
             String imageSku,
@@ -2033,6 +2057,15 @@ public final class AzureVMManagementServiceDelegate {
             } catch (Exception e) {
                 LOGGER.log(Level.SEVERE, "Invalid virtual machine image", e);
                 return Messages.Azure_GC_Template_ImageURI_Not_Valid();
+            }
+        } else if (referenceType == AzureVMAgentTemplate.ImageReferenceType.CUSTOM_REFERENCE) {
+            try {
+                GenericResource i = azureClient.genericResources().getById(imageId);
+                if (i != null) return Constants.OP_SUCCESS;
+                return Messages.Azure_GC_Template_ImageId_Not_Found();
+            } catch(Exception e) {
+                LOGGER.log(Level.SEVERE, "Invalid Image ID", e);
+                return Messages.Azure_GC_Template_ImageId_Not_Found();
             }
         } else {
             try {
@@ -2141,6 +2174,7 @@ public final class AzureVMManagementServiceDelegate {
      *
      * @param image
      * @param osType
+     * @param imageId
      * @param imagePublisher
      * @param imageOffer
      * @param imageSku
@@ -2153,6 +2187,7 @@ public final class AzureVMManagementServiceDelegate {
             String builtInImage,
             String image,
             String osType,
+            String imageId,
             String imagePublisher,
             String imageOffer,
             String imageSku,
@@ -2175,6 +2210,9 @@ public final class AzureVMManagementServiceDelegate {
                 } catch (Exception e) {
                     Messages.Azure_GC_Template_ImageURI_Not_Valid();
                 }
+                return Constants.OP_SUCCESS;
+            } else if (referenceType == AzureVMAgentTemplate.ImageReferenceType.CUSTOM_REFERENCE
+                    && StringUtils.isNotBlank(imageId)) {
                 return Constants.OP_SUCCESS;
             } else if (StringUtils.isNotBlank(imagePublisher)
                     && StringUtils.isNotBlank(imageOffer)

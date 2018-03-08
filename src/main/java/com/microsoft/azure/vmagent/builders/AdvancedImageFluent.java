@@ -11,6 +11,8 @@ public class AdvancedImageFluent<T extends AdvancedImageFluent<T>> {
 
     private String osType;
 
+    private String imageId;
+
     private String imagePublisher;
 
     private String imageOffer;
@@ -65,11 +67,13 @@ public class AdvancedImageFluent<T extends AdvancedImageFluent<T>> {
         return (T) this;
     }
 
-    public T withReferenceImage(String imagePublisher,
+    public T withReferenceImage(String imageId,
+                                String imagePublisher,
                                 String imageOffer,
                                 String imageSku,
                                 String imageVersion) {
         this.imageReferenceType = "reference";
+        this.imageId = imageId;
         this.imagePublisher = imagePublisher;
         this.imageOffer = imageOffer;
         this.imageSku = imageSku;
@@ -157,6 +161,10 @@ public class AdvancedImageFluent<T extends AdvancedImageFluent<T>> {
 
     public String getOsType() {
         return osType;
+    }
+
+    public String getImageId() {
+        return imageId;
     }
 
     public String getImagePublisher() {
